@@ -1,3 +1,115 @@
 ---
 title: "Billboard Hot 100"
+execute:
+  echo: false
 ---
+
+```{r}
+#| message: false
+library(tidyverse)
+```
+
+```{r}
+#| cache: true
+#| message: false
+billboard <- read_csv("data/billboard.csv", show_col_types = FALSE)
+billboard
+```
+
+```{r}
+billboard_long <- billboard |>
+  pivot_longer(
+    cols = starts_with("wk"),
+    names_to = "week",
+    names_prefix = "wk",
+    names_transform = list(week = as.integer),
+    values_to = "rank",
+    values_drop_na = TRUE
+  )
+```
+
+```{r}
+song_summary <- billboard_long |>
+  group_by(artist, track) |>
+  summarize(
+    first_rank = rank[which.min(week)],
+    best_rank = min(rank),
+    first_week_at_best_rank = min(week[rank == min(rank)]),
+    total_weeks = n(),
+    .groups = "drop"
+  )
+
+song_summary
+
+notable_songs <- bind_rows(
+  song_summary |>
+    filter(best_rank == 1) |>
+    arrange(first_week_at_best_rank, artist, track) |>
+    slice_head(n = 1) |>
+    mutate(notable = "Fastest to number one"),
+  song_summary |>
+    filter(best_rank == 1) |>
+    arrange(desc(first_week_at_best_rank), artist, track) |>
+    slice_head(n = 1) |>
+    mutate(notable = "Slowest to number one"),
+  song_summary |>
+    filter(best_rank <= 10) |>
+    arrange(desc(total_weeks), artist, track) |>
+    slice_head(n = 1) |>
+    mutate(notable = "Longest chart run among top-10 songs")
+) |>
+  select(notable, artist, track, first_rank, best_rank, first_week_at_best_rank, total_weeks)
+
+notable_songs
+
+billboard_top10 <- billboard_long |>
+  semi_join(
+    song_summary |> filter(best_rank <= 10),
+    by = c("artist", "track")
+  ) |>
+  left_join(
+    notable_songs |>
+      transmute(
+        artist,
+        track,
+        highlight = paste(artist, track, sep = " - ")
+      ),
+    by = c("artist", "track")
+  )
+
+ggplot(billboard_top10, aes(x = week, y = rank, group = interaction(artist, track))) +
+  geom_line(
+    data = billboard_top10 |> filter(is.na(highlight)),
+    color = "gray70"
+  ) +
+  geom_line(
+    data = billboard_top10 |> filter(!is.na(highlight)),
+    aes(color = highlight),
+    linewidth = 1
+  ) +
+  scale_color_manual(values = c("#D55E00", "#0072B2", "#009E73")) +
+  scale_y_reverse() +
+  labs(
+    x = "Week",
+    y = "Hot 100 ranking",
+    color = "Notable songs"
+  )
+```
+
+```{r}
+billboard |>
+  summarize(
+    across(
+      c(wk1, wk4, wk10, wk20, wk40, wk76),
+      list(
+        missing = \(x) sum(is.na(x)),
+        present = \(x) sum(!is.na(x))
+      )
+    )
+  ) |>
+  pivot_longer(
+    everything(),
+    names_to = c("week", ".value"),
+    names_sep = "_"
+  )
+```
